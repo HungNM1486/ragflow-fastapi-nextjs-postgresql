@@ -1,4 +1,9 @@
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
+
+import AppThemeProvider from "@/components/AppThemeProvider";
+
+const inter = Inter({ subsets: ["latin", "vietnamese"], display: "swap" });
 
 export const metadata: Metadata = {
   title: "RAGFlow Legal",
@@ -11,8 +16,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="vi">
-      <body style={{ fontFamily: "system-ui", margin: "2rem" }}>{children}</body>
+    <html lang="vi" className={inter.className}>
+      <body>
+        <AppThemeProvider>{children}</AppThemeProvider>
+      </body>
     </html>
   );
 }

@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models import ChatMessage, Conversation
 from app.ragflow_client import _headers, ragflow_create_session, ragflow_url
 
@@ -92,10 +92,10 @@ async def _get_conversation(
     return row
 
 
-def _parse_sse_last_answer(raw: bytes) -> tuple[str | None, dict[str, Any] | None]:
-    """Lấy answer cuối cùng và object data gần nhất có answer từ buffer SSE."""
+def _parse_sse_concat_answer(raw: bytes) -> tuple[str | None, dict[str, Any] | None]:
+    """Ghép các delta `data.answer` từ RAGFlow; bỏ chunk kết `final`+answer rỗng."""
     text = raw.decode("utf-8", errors="replace")
-    last_answer: str | None = None
+    chunks: list[str] = []
     last_obj: dict[str, Any] | None = None
     for line in text.splitlines():
         line = line.strip()
@@ -108,12 +108,21 @@ def _parse_sse_last_answer(raw: bytes) -> tuple[str | None, dict[str, Any] | Non
             obj = json.loads(payload)
         except json.JSONDecodeError:
             continue
-        if isinstance(obj, dict) and obj.get("code") == 0:
-            data = obj.get("data")
-            if isinstance(data, dict) and "answer" in data:
-                last_answer = str(data["answer"])
-                last_obj = obj
-    return last_answer, last_obj
+        if not isinstance(obj, dict):
+            continue
+        data = obj.get("data")
+        if not isinstance(data, dict) or "answer" not in data:
+            continue
+        ans = data.get("answer")
+        if not isinstance(ans, str):
+            continue
+        if not ans and data.get("final") is True:
+            continue
+        if ans:
+            chunks.append(ans)
+            last_obj = obj
+    full = "".join(chunks)
+    return (full if full else None), last_obj
 
 
 @router.post("/chat/completions")
@@ -137,13 +146,15 @@ async def chat_completions(
     url = ragflow_url(f"/api/v1/chats/{chat_id}/completions")
     payload: dict[str, Any] = {
         "question": body.question,
-        "stream": True,
+        "stream": body.stream,
         "session_id": conv.ragflow_session_id,
     }
 
     if body.stream:
+        conv_uid = conv.uid
 
         async def passthrough() -> AsyncIterator[bytes]:
+            buf = bytearray()
             async with httpx.AsyncClient() as client:
                 try:
                     async with client.stream(
@@ -155,14 +166,51 @@ async def chat_completions(
                     ) as resp:
                         if resp.status_code >= 400:
                             err = await resp.aread()
-                            yield err
+                            msg = err.decode("utf-8", errors="replace")[:2000]
+                            yield (
+                                "data:"
+                                + json.dumps(
+                                    {
+                                        "code": resp.status_code,
+                                        "message": msg,
+                                        "data": {
+                                            "answer": f"**Lỗi RAGFlow HTTP {resp.status_code}**: {msg}"
+                                        },
+                                    },
+                                    ensure_ascii=False,
+                                )
+                                + "\n\n"
+                            ).encode()
                             return
                         async for chunk in resp.aiter_bytes():
+                            buf.extend(chunk)
                             yield chunk
                 except Exception as e:  # noqa: BLE001
                     yield (
-                        f'data:{{"code":500,"message":{json.dumps(str(e))}}}\n\n'
+                        "data:"
+                        + json.dumps(
+                            {
+                                "code": 500,
+                                "message": str(e),
+                                "data": {"answer": f"**Lỗi proxy**: {e!s}"},
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n\n"
                     ).encode()
+                    return
+            raw = bytes(buf)
+            answer, last_obj = _parse_sse_concat_answer(raw)
+            async with SessionLocal() as persist_db:
+                persist_db.add(
+                    ChatMessage(
+                        conversation_uid=conv_uid,
+                        role="assistant",
+                        content=answer,
+                        raw_payload=last_obj,
+                    )
+                )
+                await persist_db.commit()
 
         return StreamingResponse(
             passthrough(),
@@ -172,27 +220,40 @@ async def chat_completions(
 
     async with httpx.AsyncClient() as client:
         try:
-            async with client.stream(
-                "POST",
+            r = await client.post(
                 url,
                 headers=_headers(),
                 json=payload,
                 timeout=httpx.Timeout(300.0, connect=30.0),
-            ) as resp:
-                if resp.status_code >= 400:
-                    err = await resp.aread()
-                    raise HTTPException(
-                        status_code=502,
-                        detail=err.decode("utf-8", errors="replace")[:4000],
-                    )
-                buf = bytearray()
-                async for chunk in resp.aiter_bytes():
-                    buf.extend(chunk)
+            )
+            if r.status_code >= 400:
+                raise HTTPException(
+                    status_code=502,
+                    detail=r.text[:4000],
+                )
+            try:
+                rag_body = r.json()
+            except json.JSONDecodeError as e:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"RAGFlow trả không phải JSON: {e}",
+                ) from e
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=str(e)) from e
 
-    raw = bytes(buf)
-    answer, last_obj = _parse_sse_last_answer(raw)
+    if not isinstance(rag_body, dict):
+        raise HTTPException(status_code=502, detail="RAGFlow trả body không phải JSON object")
+    if rag_body.get("code") != 0:
+        raise HTTPException(
+            status_code=502,
+            detail=str(rag_body.get("message", rag_body))[:4000],
+        )
+    data = rag_body.get("data")
+    answer: str | None = None
+    last_obj: dict[str, Any] | None = None
+    if isinstance(data, dict) and "answer" in data:
+        answer = str(data["answer"])
+        last_obj = rag_body
     db.add(
         ChatMessage(
             conversation_uid=conv.uid,
@@ -202,12 +263,10 @@ async def chat_completions(
         )
     )
     await db.commit()
-    raw_text = raw.decode("utf-8", errors="replace")
     return JSONResponse(
         {
             "conversation_uid": str(conv.uid),
             "answer": answer,
             "ragflow": last_obj,
-            "raw_sse_tail": raw_text[-50000:] if len(raw_text) > 50000 else raw_text,
         }
     )
