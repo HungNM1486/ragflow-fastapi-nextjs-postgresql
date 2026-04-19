@@ -1,0 +1,77 @@
+# Stack: RAGFlow (upstream compose) + Postgres (backend app) + FastAPI + Next.js.
+# Chạy từ thư mục gốc repo:
+#   docker compose --env-file docker/ragflow/upstream/.env up -d
+# Chỉ FE publish ra host (127.0.0.1:3000). RAGFlow UI/API: 127.0.0.1:18080, 127.0.0.1:19380, ...
+# Ollama trên host: RAGFlow đã có extra_hosts; cấu hình model Ollama trong UI RAGFlow (base URL host.docker.internal:11434 nếu Ollama chỉ bind localhost — có thể cần OLLAMA_HOST=0.0.0.0 trên host).
+
+name: ragflow_legal
+
+include:
+  - path: docker/ragflow/upstream/docker-compose.yml
+    env_file:
+      - docker/ragflow/upstream/.env
+
+services:
+  postgres_app:
+    image: postgres:16-alpine
+    container_name: ragflow_legal_postgres_app
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_APP_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_APP_PASSWORD:-app_dev_change_me}
+      POSTGRES_DB: ${POSTGRES_APP_DB:-ragflow_legal}
+    volumes:
+      - postgres_app_data:/var/lib/postgresql/data
+    networks:
+      - ragflow
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_APP_USER:-app} -d ${POSTGRES_APP_DB:-ragflow_legal}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ragflow_legal_backend
+    restart: unless-stopped
+    # RAGFLOW_API_KEY / RAGFLOW_CHAT_ID lấy từ file (điền giá trị thật), tránh ${...} rỗng ghi đè env_file.
+    env_file:
+      - docker/ragflow/upstream/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-app}:${POSTGRES_APP_PASSWORD:-app_dev_change_me}@postgres_app:5432/${POSTGRES_APP_DB:-ragflow_legal}
+      RAGFLOW_BASE_URL: http://ragflow-cpu:9380
+    ports:
+      - "127.0.0.1:${APP_BACKEND_PORT:-8000}:8000"
+    depends_on:
+      postgres_app:
+        condition: service_healthy
+    networks:
+      - ragflow
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ragflow_legal_frontend
+    restart: unless-stopped
+    environment:
+      INTERNAL_API_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${APP_FE_PORT:-3000}:3000"
+    networks:
+      - ragflow
+
+volumes:
+  postgres_app_data:
+    name: ragflow_legal_postgres_app_data
