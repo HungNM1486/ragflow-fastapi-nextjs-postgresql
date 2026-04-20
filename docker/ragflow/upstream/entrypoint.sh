@@ -260,9 +260,26 @@ function wait_for_server() {
     echo "$server_name is ready."
 }
 
+function start_tika_server() {
+    # Tika 3.x may fail in fork mode in some container runtimes.
+    # We start it explicitly with --noFork and let tika-python use client-only mode.
+    export TIKA_CLIENT_ONLY=true
+    export TIKA_SERVER_ENDPOINT="${TIKA_SERVER_ENDPOINT:-http://127.0.0.1:9998}"
+    export TIKA_JAVA="${TIKA_JAVA:-java}"
+    local tika_port="${TIKA_PORT:-9998}"
+    local tika_host="${TIKA_HOST:-0.0.0.0}"
+    local tika_jar="${TIKA_SERVER_JAR:-/ragflow/tika-server-standard-3.2.3.jar}"
+    tika_jar="${tika_jar#file://}"
+
+    echo "Starting Tika server at ${tika_host}:${tika_port} with --noFork..."
+    "$TIKA_JAVA" -jar "$tika_jar" --host "$tika_host" --port "$tika_port" --noFork >/tmp/tika-server.log 2>&1 &
+    wait_for_server "${TIKA_SERVER_ENDPOINT}/" "tika_server"
+}
+
 # -----------------------------------------------------------------------------
 # Start components based on flags
 # -----------------------------------------------------------------------------
+start_tika_server
 ensure_docling
 ensure_db_init
 
