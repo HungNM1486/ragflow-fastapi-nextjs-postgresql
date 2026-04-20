@@ -17,7 +17,7 @@ target_metadata = Base.metadata
 def get_sync_url() -> str:
     url = os.environ.get(
         "DATABASE_URL",
-        "postgresql+asyncpg://app:app@localhost:5432/ragflow_legal",
+        "postgresql+asyncpg://app:app_dev_change_me@127.0.0.1:5433/ragflow_legal",
     )
     if url.startswith("postgresql+asyncpg://"):
         return url.replace("postgresql+asyncpg://", "postgresql://", 1)

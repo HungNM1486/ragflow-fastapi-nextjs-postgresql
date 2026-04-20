@@ -1,8 +1,16 @@
-# Stack: RAGFlow (upstream compose) + Postgres (backend app) + FastAPI + Next.js.
-# Chạy từ thư mục gốc repo:
+# Stack: RAGFlow (upstream) + Postgres ứng dụng; tùy chọn backend + frontend trong Docker (profile `app-docker`).
+#
+# Dev (BE/FE trên host, reload nhanh): chỉ hạ tầng — Postgres map ra 127.0.0.1:${POSTGRES_APP_HOST_PORT:-5433}.
 #   docker compose --env-file docker/ragflow/upstream/.env up -d
-# Chỉ FE publish ra host (127.0.0.1:3000). RAGFlow UI/API: 127.0.0.1:18080, 127.0.0.1:19380, ...
-# Ollama trên host: RAGFlow đã có extra_hosts; cấu hình model Ollama trong UI RAGFlow (base URL host.docker.internal:11434 nếu Ollama chỉ bind localhost — có thể cần OLLAMA_HOST=0.0.0.0 trên host).
+#   Sau đó: backend `uvicorn` từ thư mục backend/ (xem backend/.env.example), frontend `npm run dev` (INTERNAL_API_URL mặc định 127.0.0.1:8000).
+#
+# Full trong Docker (BE/FE trong container): nối profile `app-docker` vào cùng bộ profile RAGFlow
+# (không chỉ `--profile app-docker` — sẽ ghi đè COMPOSE_PROFILES từ .env và thiếu ragflow-cpu / doc engine).
+#   COMPOSE_PROFILES=elasticsearch,cpu,app-docker docker compose --env-file docker/ragflow/upstream/.env up -d
+#   (thay elasticsearch,cpu bằng đúng giá trị DOC_ENGINE,DEVICE trong .env của bạn nếu khác.)
+#   Hoặc sửa dòng COMPOSE_PROFILES trong docker/ragflow/upstream/.env thành …,app-docker rồi `docker compose … up -d`.
+#
+# RAGFlow UI/API: cổng trong docker/ragflow/upstream/.env (vd. 18080, 19380). Ollama trên host: host.docker.internal:11434.
 
 name: ragflow_legal
 
@@ -20,6 +28,8 @@ services:
       POSTGRES_USER: ${POSTGRES_APP_USER:-app}
       POSTGRES_PASSWORD: ${POSTGRES_APP_PASSWORD:-app_dev_change_me}
       POSTGRES_DB: ${POSTGRES_APP_DB:-ragflow_legal}
+    ports:
+      - "127.0.0.1:${POSTGRES_APP_HOST_PORT:-5433}:5432"
     volumes:
       - postgres_app_data:/var/lib/postgresql/data
     networks:
@@ -35,6 +45,8 @@ services:
       retries: 12
 
   backend:
+    profiles:
+      - app-docker
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -57,6 +69,8 @@ services:
       - "host.docker.internal:host-gateway"
 
   frontend:
+    profiles:
+      - app-docker
     build:
       context: ./frontend
       dockerfile: Dockerfile

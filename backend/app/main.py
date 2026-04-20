@@ -6,8 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.config import settings
-from app.database import engine
-from app.routers import chat
+from app.database import SessionLocal, engine
+from app.routers import admin_users, auth, chat
+from app.services.bootstrap import ensure_bootstrap_admin
 
 
 class HealthRagflow(BaseModel):
@@ -18,6 +19,8 @@ class HealthRagflow(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    async with SessionLocal() as db:
+        await ensure_bootstrap_admin(db)
     yield
     await engine.dispose()
 
@@ -33,6 +36,8 @@ app.add_middleware(
 )
 
 app.include_router(chat.router, prefix="/api/v1")
+app.include_router(auth.router, prefix="/api/v1")
+app.include_router(admin_users.router, prefix="/api/v1")
 
 
 @app.get("/health")

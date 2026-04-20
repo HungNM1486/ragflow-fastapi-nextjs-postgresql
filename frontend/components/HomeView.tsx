@@ -2,6 +2,7 @@
 
 import ChatIcon from "@mui/icons-material/Chat";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
+import LoginIcon from "@mui/icons-material/Login";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
@@ -65,6 +66,9 @@ export default function HomeView({ healthLine }: Props) {
               startIcon={<AdminPanelSettingsIcon />}
             >
               Admin
+            </Button>
+            <Button component={Link} href="/login" variant="text" startIcon={<LoginIcon />}>
+              Đăng nhập
             </Button>
           </CardActions>
         </Card>
