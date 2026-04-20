@@ -1,78 +1,141 @@
 "use client";
 
-import ChatIcon from "@mui/icons-material/Chat";
-import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
-import LoginIcon from "@mui/icons-material/Login";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Card from "@mui/material/Card";
-import CardActions from "@mui/material/CardActions";
-import CardContent from "@mui/material/CardContent";
-import Chip from "@mui/material/Chip";
-import Container from "@mui/material/Container";
-import Stack from "@mui/material/Stack";
-import Typography from "@mui/material/Typography";
+import React from "react";
 import Link from "next/link";
+import { motion } from "framer-motion";
+import { MessageSquare, Settings, LogIn, Shield, CheckCircle2, AlertCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type Props = { healthLine: string };
 
 export default function HomeView({ healthLine }: Props) {
-  const ok = healthLine.toLowerCase().includes("ok");
-  return (
-    <Container maxWidth="sm" sx={{ py: 4 }}>
-      <Stack spacing={3}>
-        <Box>
-          <Typography variant="h4" component="h1" gutterBottom sx={{ fontWeight: 700 }}>
-            RAGFlow Legal
-          </Typography>
-          <Chip
-            label={healthLine}
-            color={ok ? "success" : "warning"}
-            size="small"
-            sx={{
-              fontWeight: 500,
-              maxWidth: "100%",
-              height: "auto",
-              py: 0.5,
-              "& .MuiChip-label": { whiteSpace: "normal" },
-            }}
-          />
-        </Box>
+  const isOk = healthLine.toLowerCase().includes("ok");
 
-        <Card variant="outlined">
-          <CardContent>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-              Trình duyệt → Next <code>/api/v1</code> → FastAPI → RAGFlow. Cấu hình{" "}
-              <code>RAGFLOW_API_KEY</code>, <code>RAGFLOW_CHAT_ID</code> trong{" "}
-              <code>docker/ragflow/upstream/.env</code>.
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              RAGFlow UI trên host: cổng theo <code>.env</code> (thường <code>18080</code>).
-            </Typography>
-          </CardContent>
-          <CardActions sx={{ px: 2, pb: 2, flexWrap: "wrap", gap: 1 }}>
-            <Button
-              component={Link}
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1,
+        delayChildren: 0.2,
+      },
+    },
+  };
+
+  const itemVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: "easeOut" } as any },
+  };
+
+  return (
+    <div className="min-h-screen bg-[#fafafa] text-zinc-900 selection:bg-zinc-200">
+      {/* Background patterns */}
+      <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-zinc-100 rounded-full blur-[120px]" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-zinc-100 rounded-full blur-[120px]" />
+      </div>
+
+      <main className="relative z-10 container mx-auto px-6 pt-24 pb-12 flex flex-col items-center justify-center">
+        <motion.div
+          variants={containerVariants}
+          initial="hidden"
+          animate="visible"
+          className="max-w-3xl w-full text-center space-y-12"
+        >
+          {/* Badge */}
+          <motion.div variants={itemVariants} className="flex justify-center">
+            <div className={cn(
+              "inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border backdrop-blur-sm transition-all",
+              isOk ? "bg-emerald-50/50 border-emerald-100 text-emerald-700" : "bg-amber-50/50 border-amber-100 text-amber-700"
+            )}>
+              {isOk ? <CheckCircle2 className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
+              {healthLine}
+            </div>
+          </motion.div>
+
+          {/* Hero Content */}
+          <div className="space-y-6">
+            <motion.h1 
+              variants={itemVariants}
+              className="text-5xl md:text-7xl font-bold tracking-tight text-zinc-900"
+            >
+              RAGFlow <span className="text-zinc-400">Legal</span>
+            </motion.h1>
+            <motion.p 
+              variants={itemVariants}
+              className="text-lg md:text-xl text-zinc-500 max-w-xl mx-auto leading-relaxed"
+            >
+              Hệ thống tra cứu và phân tích văn bản pháp luật thông minh, được tối ưu hóa cho độ chính xác và hiệu suất cao.
+            </motion.p>
+          </div>
+
+          {/* Action Cards */}
+          <motion.div 
+            variants={itemVariants}
+            className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4"
+          >
+            <ActionCard 
               href="/chat"
-              variant="contained"
-              startIcon={<ChatIcon />}
-            >
-              Chat
-            </Button>
-            <Button
-              component={Link}
+              title="Chat"
+              description="Hỏi đáp pháp lý với AI dựa trên kho dữ liệu của bạn."
+              icon={<MessageSquare className="w-5 h-5 text-zinc-900" />}
+              primary
+            />
+            <ActionCard 
               href="/admin"
-              variant="outlined"
-              startIcon={<AdminPanelSettingsIcon />}
-            >
-              Admin
-            </Button>
-            <Button component={Link} href="/login" variant="text" startIcon={<LoginIcon />}>
-              Đăng nhập
-            </Button>
-          </CardActions>
-        </Card>
-      </Stack>
-    </Container>
+              title="Admin"
+              description="Quản lý dữ liệu, người dùng và thiết lập hệ thống."
+              icon={<Settings className="w-5 h-5 text-zinc-500" />}
+            />
+            <ActionCard 
+              href="/login"
+              title="Tài khoản"
+              description="Đăng nhập để quản lý và cá nhân hóa trải nghiệm."
+              icon={<LogIn className="w-5 h-5 text-zinc-500" />}
+            />
+          </motion.div>
+
+          {/* Infrastructure Info */}
+          <motion.div 
+            variants={itemVariants}
+            className="pt-12 border-t border-zinc-200/60"
+          >
+            <div className="flex flex-col md:flex-row items-center justify-center gap-8 md:gap-16 opacity-40 grayscale hover:grayscale-0 transition-all duration-700">
+               <div className="flex items-center gap-2">
+                 <Shield className="w-5 h-5" />
+                 <span className="text-sm font-semibold tracking-widest uppercase">Safe & Secure</span>
+               </div>
+               <div className="text-sm font-medium">Bản quyền &copy; 2024 LegalTech Solutions</div>
+            </div>
+          </motion.div>
+        </motion.div>
+      </main>
+    </div>
+  );
+}
+
+function ActionCard({ href, title, description, icon, primary = false }: { 
+  href: string, 
+  title: string, 
+  description: string, 
+  icon: React.ReactNode,
+  primary?: boolean 
+}) {
+  return (
+    <Link href={href} className="group">
+      <div className={cn(
+        "h-full p-6 text-left rounded-2xl border transition-all duration-300",
+        primary 
+          ? "bg-white border-zinc-200 shadow-sm group-hover:shadow-md group-hover:border-zinc-300" 
+          : "bg-zinc-50/50 border-transparent hover:bg-white hover:border-zinc-200 hover:shadow-sm"
+      )}>
+        <div className="w-10 h-10 rounded-xl bg-white border border-zinc-100 flex items-center justify-center mb-4 shadow-sm transition-transform duration-300 group-hover:scale-110">
+          {icon}
+        </div>
+        <h3 className="text-base font-semibold text-zinc-900 mb-2">{title}</h3>
+        <p className="text-sm text-zinc-500 leading-relaxed">{description}</p>
+      </div>
+    </Link>
   );
 }

@@ -1,17 +1,13 @@
 "use client";
 
-import HomeOutlinedIcon from "@mui/icons-material/HomeOutlined";
-import LoginIcon from "@mui/icons-material/Login";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Container from "@mui/material/Container";
+import React, { useState } from "react";
 import Link from "next/link";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { motion } from "framer-motion";
+import { LogIn, ArrowLeft, AlertCircle, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 const apiBase = "";
 
@@ -53,46 +49,98 @@ export default function LoginPage() {
   }
 
   return (
-    <Container maxWidth="sm" sx={{ py: 4 }}>
-      <Stack spacing={2} component="form" onSubmit={onSubmit}>
-        <Typography variant="h5" component="h1" sx={{ fontWeight: 700 }}>
-          Đăng nhập
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Phiên cookie HttpOnly; dùng tài khoản admin từ backend (bootstrap hoặc đã tạo).
-        </Typography>
-        {error ? (
-          <Alert severity="error" onClose={() => setError(null)}>
-            {error}
-          </Alert>
-        ) : null}
-        <TextField
-          label="Email"
-          type="email"
-          autoComplete="username"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-          fullWidth
-        />
-        <TextField
-          label="Mật khẩu"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          fullWidth
-        />
-        <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
-          <Button type="submit" variant="contained" disabled={busy} startIcon={<LoginIcon />}>
-            Đăng nhập
-          </Button>
-          <Button component={Link} href="/" variant="text" startIcon={<HomeOutlinedIcon />}>
-            Trang chủ
-          </Button>
-        </Box>
-      </Stack>
-    </Container>
+    <div className="min-h-screen bg-[#fafafa] flex flex-col items-center justify-center p-6">
+      {/* Back to Home */}
+      <motion.div 
+        initial={{ opacity: 0, x: -20 }}
+        animate={{ opacity: 1, x: 0 }}
+        className="absolute top-8 left-8"
+      >
+        <Link href="/" className="inline-flex items-center gap-2 text-zinc-500 hover:text-zinc-900 transition-colors text-sm font-medium">
+          <ArrowLeft className="w-4 h-4" />
+          Quay lại trang chủ
+        </Link>
+      </motion.div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: "easeOut" } as any}
+        className="w-full max-w-md"
+      >
+        <div className="bg-white p-8 md:p-10 rounded-3xl border border-zinc-200 shadow-sm space-y-8">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-bold tracking-tight text-zinc-900">Đăng nhập</h1>
+            <p className="text-zinc-500 text-sm leading-relaxed">
+              Truy cập vào hệ thống quản trị RAGFlow Legal.
+            </p>
+          </div>
+
+          {error && (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="p-4 rounded-xl bg-red-50 border border-red-100 flex items-start gap-3 text-red-700 text-sm"
+            >
+              <AlertCircle className="w-5 h-5 shrink-0" />
+              <p>{error}</p>
+            </motion.div>
+          )}
+
+          <form onSubmit={onSubmit} className="space-y-6">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-zinc-700 ml-1">Email</label>
+                <Input 
+                  type="email" 
+                  placeholder="name@example.com"
+                  autoComplete="username"
+                  className="rounded-xl border-zinc-200 h-12 focus:ring-zinc-900" 
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between ml-1">
+                  <label className="text-sm font-semibold text-zinc-700">Mật khẩu</label>
+                </div>
+                <Input 
+                  type="password" 
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  className="rounded-xl border-zinc-200 h-12 focus:ring-zinc-900" 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            <Button 
+              type="submit" 
+              className="w-full h-12 rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 transition-all font-semibold"
+              disabled={busy}
+            >
+              {busy ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Đang xử lý...
+                </>
+              ) : (
+                <>
+                  <LogIn className="mr-2 h-4 w-4" />
+                  Tiếp tục
+                </>
+              )}
+            </Button>
+          </form>
+
+          <p className="text-center text-xs text-zinc-400">
+            Cookie session HttpOnly đảm bảo an toàn cho phiên đăng nhập của bạn.
+          </p>
+        </div>
+      </motion.div>
+    </div>
   );
 }

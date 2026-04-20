@@ -48,6 +48,7 @@ class ConversationPatchBody(BaseModel):
 class ChatMessageOut(BaseModel):
     role: str
     content: str | None
+    raw_payload: dict[str, Any] | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

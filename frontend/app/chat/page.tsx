@@ -1,63 +1,56 @@
 "use client";
 
-import AddCommentOutlinedIcon from "@mui/icons-material/AddCommentOutlined";
-import DeleteIcon from "@mui/icons-material/Delete";
-import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
-import HomeOutlinedIcon from "@mui/icons-material/HomeOutlined";
-import SendIcon from "@mui/icons-material/Send";
-import SmartToyOutlinedIcon from "@mui/icons-material/SmartToyOutlined";
-import PersonOutlinedIcon from "@mui/icons-material/PersonOutlined";
-import SettingsSuggestOutlinedIcon from "@mui/icons-material/SettingsSuggestOutlined";
-import Alert from "@mui/material/Alert";
-import Avatar from "@mui/material/Avatar";
-import Chip from "@mui/material/Chip";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import CircularProgress from "@mui/material/CircularProgress";
-import Container from "@mui/material/Container";
-import Dialog from "@mui/material/Dialog";
-import DialogActions from "@mui/material/DialogActions";
-import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
-import FormControlLabel from "@mui/material/FormControlLabel";
-import IconButton from "@mui/material/IconButton";
-import Paper from "@mui/material/Paper";
-import Popover from "@mui/material/Popover";
-import Stack from "@mui/material/Stack";
-import Switch from "@mui/material/Switch";
-import TextField from "@mui/material/TextField";
-import Tooltip from "@mui/material/Tooltip";
-import Typography from "@mui/material/Typography";
+import React, { useCallback, useEffect, useState, type MouseEvent, useRef } from "react";
 import Link from "next/link";
-import { useCallback, useEffect, useState, type MouseEvent } from "react";
+import { 
+  MessageSquarePlus, 
+  Send, 
+  Home, 
+  User, 
+  Bot, 
+  Settings2, 
+  Trash2, 
+  Edit3, 
+  Plus, 
+  MoreVertical,
+  X,
+  Check,
+  Loader2,
+  AlertCircle,
+  Menu,
+  FileText
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import { motion, AnimatePresence } from "framer-motion";
 
-/** Cùng origin → Next proxy `/api/v1/*` tới backend. */
+/** Types & Helpers (kept from original) */
 const apiBase = "";
-
 const creds: RequestInit = { credentials: "include" };
+
+type CitationEntry = { 
+  id: number; 
+  title?: string; 
+  snippet?: string; 
+  doc_id?: string;
+  page_num?: string | number;
+  similarity?: number;
+};
+type Line = { role: "user" | "assistant" | "system"; text: string; citations?: CitationEntry[]; };
+type ConversationItem = { uid: string; title: string; ragflow_chat_id: string; created_at: string; last_active_at: string; };
+type ParsedDelta = { piece: string | null; data: Record<string, unknown> | null };
 
 function defaultConversationTitle(): string {
   const d = new Date();
-  return `Hội thoại mới · ${d.toLocaleString("vi-VN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })}`;
+  return `Hội thoại mới · ${d.toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`;
 }
 
-/** Rút gọn câu hỏi đầu tiên làm tiêu đề hội thoại (giới hạn độ dài theo BE). */
 function titleFromFirstQuestion(q: string, maxLen = 72): string {
   const collapsed = q.replace(/\s+/g, " ").trim();
-  const firstLine =
-    collapsed
-      .split("\n")
-      .map((s) => s.trim())
-      .find((line) => line.length > 0) ?? "";
-  const base = firstLine.length > 0 ? firstLine : "Hội thoại";
-  if (base.length <= maxLen) return base;
-  return `${base.slice(0, Math.max(1, maxLen - 1))}…`;
+  const firstLine = collapsed.split("\n").find((line) => line.trim().length > 0) ?? "Hội thoại";
+  if (firstLine.length <= maxLen) return firstLine;
+  return `${firstLine.slice(0, Math.max(1, maxLen - 1))}…`;
 }
 
 async function patchConversationTitleApi(uid: string, title: string): Promise<void> {
@@ -67,37 +60,8 @@ async function patchConversationTitleApi(uid: string, title: string): Promise<vo
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title }),
   });
-  if (!r.ok) {
-    const text = await r.text();
-    throw new Error(text || r.statusText);
-  }
+  if (!r.ok) throw new Error(await r.text() || r.statusText);
 }
-
-type CitationEntry = {
-  id: number;
-  title?: string;
-  snippet?: string;
-};
-
-type Line = {
-  role: "user" | "assistant" | "system";
-  text: string;
-  citations?: CitationEntry[];
-};
-
-type ConversationItem = {
-  uid: string;
-  title: string;
-  ragflow_chat_id: string;
-  created_at: string;
-  last_active_at: string;
-};
-
-type ParsedDelta = { piece: string | null; data: Record<string, unknown> | null };
-type CitationPopoverState = {
-  anchorEl: HTMLElement;
-  citation: CitationEntry;
-};
 
 function parseCitationIdsFromAnswer(answer: string): number[] {
   const out = new Set<number>();
@@ -110,104 +74,106 @@ function parseCitationIdsFromAnswer(answer: string): number[] {
   return Array.from(out).sort((a, b) => a - b);
 }
 
-function normalizeCitations(rawData: unknown, answer: string): CitationEntry[] {
+function normalizeCitations(rawData: any, answer: string): CitationEntry[] {
   const map = new Map<number, CitationEntry>();
   const idsFromAnswer = parseCitationIdsFromAnswer(answer);
   for (const id of idsFromAnswer) map.set(id, { id });
+  
+  if (!rawData || typeof rawData !== "object") return Array.from(map.values()).sort((a, b) => a.id - b.id);
 
-  if (!rawData || typeof rawData !== "object") {
-    return Array.from(map.values()).sort((a, b) => a.id - b.id);
-  }
-  const data = rawData as { reference?: unknown };
-  const ref = data.reference;
-  if (!ref || typeof ref !== "object") {
-    return Array.from(map.values()).sort((a, b) => a.id - b.id);
-  }
-  const chunks = (ref as { chunks?: unknown }).chunks;
-  if (!Array.isArray(chunks)) {
-    return Array.from(map.values()).sort((a, b) => a.id - b.id);
-  }
+  // Handle both { data: { reference: ... } } and { reference: ... }
+  const chunks = rawData.reference?.chunks || rawData.data?.reference?.chunks;
+  if (!Array.isArray(chunks)) return Array.from(map.values()).sort((a, b) => a.id - b.id);
 
-  const titleFromChunk = (x: Record<string, unknown>): string | undefined => {
-    const titleCandidates = [
-      x.docnm_kwd,
-      x.document_name,
-      x.doc_name,
-      x.docnm,
-      x.dataset_name,
-      x.document,
-    ];
-    return titleCandidates.find((v) => typeof v === "string") as string | undefined;
-  };
-  const snippetFromChunk = (x: Record<string, unknown>): string | undefined => {
-    const snippetCandidates = [x.content, x.chunk, x.text];
-    return snippetCandidates.find((v) => typeof v === "string") as string | undefined;
-  };
+  const getTitle = (x: any) => x.docnm_kwd || x.document_name || x.doc_name || x.docnm || x.dataset_name || x.document || "Tài liệu không tên";
+  const getSnippet = (x: any) => x.content_with_weight || x.content || x.chunk || x.text;
 
-  // RAGFlow thường đánh [ID:n] theo thứ tự chunks (0-based), không phải chunk.id.
-  // Ưu tiên map trực tiếp n -> chunks[n], fallback về (n-1) để tương thích dữ liệu cũ.
   for (const entry of map.values()) {
-    const candidateIndexes = [entry.id, entry.id - 1];
-    const idx = candidateIndexes.find((x) => x >= 0 && x < chunks.length);
-    const raw = typeof idx === "number" ? chunks[idx] : null;
-    if (!raw || typeof raw !== "object") continue;
-    const x = raw as Record<string, unknown>;
-    map.set(entry.id, {
-      id: entry.id,
-      title: entry.title ?? titleFromChunk(x),
-      snippet: entry.snippet ?? snippetFromChunk(x),
-    });
-  }
-
-  for (const c of chunks) {
-    if (!c || typeof c !== "object") continue;
-    const x = c as Record<string, unknown>;
-    const maybeId =
-      typeof x.id === "number"
-        ? x.id
-        : typeof x.id === "string"
-          ? Number(x.id)
-          : typeof x.index === "number"
-            ? x.index
-            : typeof x.chunk_id === "number"
-              ? x.chunk_id
-              : NaN;
-    if (!Number.isFinite(maybeId)) continue;
-    const id = Number(maybeId);
-    const prev = map.get(id) ?? { id };
-    const title = titleFromChunk(x);
-    const snippet = snippetFromChunk(x);
-    map.set(id, {
-      id,
-      title: prev.title ?? title,
-      snippet: prev.snippet ?? snippet,
-    });
+    const idx = [entry.id - 1, entry.id].find(i => i >= 0 && i < chunks.length);
+    const x = typeof idx === 'number' ? chunks[idx] : null;
+    if (x) {
+      map.set(entry.id, { 
+        id: entry.id, 
+        title: getTitle(x), 
+        snippet: getSnippet(x),
+        page_num: x.img_id || x.page_num || x.page_no,
+        similarity: x.similarity
+      });
+    }
   }
   return Array.from(map.values()).sort((a, b) => a.id - b.id);
 }
 
-function citationContent(c?: CitationEntry): string {
-  const content = c?.snippet?.trim();
-  return content && content.length > 0 ? content : "Không có nội dung trích dẫn.";
-}
+/** 
+ * Simple Inline Citation Component with Tooltip (hover) and Modal (click)
+ */
+function Citation({ citation }: { citation: CitationEntry }) {
+  const [isHovered, setIsHovered] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  
+  return (
+    <span className="relative inline-block group/cite">
+      <button 
+        type="button"
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        onClick={(e) => { e.stopPropagation(); setIsModalOpen(true); setIsHovered(false); }}
+        className={cn(
+          "inline-flex items-center gap-1 mx-1 px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all border shadow-sm",
+          isHovered || isModalOpen
+            ? "bg-zinc-900 border-zinc-900 text-white" 
+            : "bg-zinc-50 border-zinc-200 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
+        )}
+      >
+        nguồn {citation.id}
+      </button>
 
-function roleIcon(role: Line["role"]) {
-  switch (role) {
-    case "user":
-      return <PersonOutlinedIcon fontSize="small" />;
-    case "assistant":
-      return <SmartToyOutlinedIcon fontSize="small" />;
-    default:
-      return <SettingsSuggestOutlinedIcon fontSize="small" />;
-  }
-}
+      {/* Tooltip on Hover */}
+      <AnimatePresence>
+        {isHovered && !isModalOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 md:w-80 z-[60] pointer-events-none"
+          >
+            <div className="bg-white border border-zinc-200 shadow-xl rounded-xl p-4 overflow-hidden pointer-events-auto">
+              <p className="text-[12px] text-zinc-600 leading-relaxed font-normal line-clamp-6">
+                {citation.snippet || "Không có nội dung trích dẫn."}
+              </p>
+            </div>
+            <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-0.5 w-3 h-3 bg-white border-r border-b border-zinc-200 rotate-45" />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-function roleAvatarSx(role: Line["role"]) {
-  if (role === "user")
-    return { bgcolor: "primary.main", color: "primary.contrastText" } as const;
-  if (role === "assistant")
-    return { bgcolor: "secondary.main", color: "secondary.contrastText" } as const;
-  return { bgcolor: "grey.600", color: "grey.100" } as const;
+      <AnimatePresence>
+        {isModalOpen && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }}
+              onClick={() => setIsModalOpen(false)}
+              className="fixed inset-0 bg-black/50 backdrop-blur-md z-[100] cursor-pointer"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="fixed inset-0 m-auto w-[95%] max-w-2xl h-fit max-h-[80vh] z-[110] bg-white border border-zinc-200 shadow-2xl rounded-[32px] overflow-hidden flex flex-col pointer-events-auto"
+            >
+              <div className="p-8 md:p-16 overflow-y-auto overflow-x-hidden scrollbar-thin">
+                <p className="text-[16px] md:text-[18px] text-zinc-900 leading-relaxed font-normal whitespace-pre-wrap">
+                  {citation.snippet || "Không có nội dung trích dẫn."}
+                </p>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </span>
+  );
 }
 
 export default function ChatPage() {
@@ -218,68 +184,58 @@ export default function ChatPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [useStream, setUseStream] = useState(true);
-  const [citationPopover, setCitationPopover] = useState<CitationPopoverState | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const [renameOpen, setRenameOpen] = useState(false);
   const [renameUid, setRenameUid] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
 
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleteUid, setDeleteUid] = useState<string | null>(null);
-  const [deleteTitle, setDeleteTitle] = useState("");
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [lines]);
 
   const loadConversations = useCallback(async (): Promise<ConversationItem[]> => {
     const r = await fetch(`${apiBase}/api/v1/chat/conversations`, { ...creds });
-    const j = (await r.json()) as ConversationItem[] | { detail?: unknown };
-    if (!r.ok) {
-      throw new Error(
-        typeof (j as { detail?: unknown }).detail === "string"
-          ? (j as { detail?: string }).detail
-          : JSON.stringify((j as { detail?: unknown }).detail ?? j)
-      );
-    }
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || "Error loading conversations");
     const items = Array.isArray(j) ? j : [];
     setConversations(items);
     return items;
   }, []);
 
   const loadConversationMessages = useCallback(async (uid: string) => {
-    const r = await fetch(`${apiBase}/api/v1/chat/conversations/${uid}/messages`, { ...creds });
-    const j = (await r.json()) as
-      | { role: "user" | "assistant" | "system"; content: string | null }[]
-      | { detail?: unknown };
-    if (!r.ok) {
-      throw new Error(
-        typeof (j as { detail?: unknown }).detail === "string"
-          ? (j as { detail?: string }).detail
-          : JSON.stringify((j as { detail?: unknown }).detail ?? j)
-      );
+    setBusy(true);
+    try {
+      const r = await fetch(`${apiBase}/api/v1/chat/conversations/${uid}/messages`, { ...creds });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.detail || "Error loading messages");
+      setConversationUid(uid);
+      setLines((j as any[]).map(m => {
+        const text = m.content ?? "";
+        return { 
+          role: m.role, 
+          text: text,
+          citations: m.raw_payload ? normalizeCitations(m.raw_payload, text) : undefined
+        };
+      }));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
     }
-    const rows = Array.isArray(j) ? j : [];
-    setConversationUid(uid);
-    setLines(
-      rows.map((m) => ({
-        role: m.role,
-        text: m.content ?? "",
-      }))
-    );
   }, []);
 
   useEffect(() => {
-    void (async () => {
-      try {
-        setError(null);
-        const items = await loadConversations();
-        if (items.length > 0) {
-          await loadConversationMessages(items[0].uid);
-        }
-      } catch (e) {
-        setError(String(e));
-      }
-    })();
+    loadConversations().then(items => {
+      if (items.length > 0) loadConversationMessages(items[0].uid);
+    }).catch(e => setError(String(e)));
   }, [loadConversations, loadConversationMessages]);
 
-  const newSession = useCallback(async () => {
+  const newSession = async () => {
     setError(null);
     setBusy(true);
     try {
@@ -289,603 +245,355 @@ export default function ChatPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: defaultConversationTitle() }),
       });
-      const j = (await r.json()) as { conversation_uid?: string; detail?: unknown };
-      if (!r.ok) {
-        throw new Error(
-          typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail ?? j)
-        );
-      }
-      if (!j.conversation_uid) throw new Error("Thiếu conversation_uid");
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.detail || "Error creating session");
       setConversationUid(j.conversation_uid);
       setLines([]);
       await loadConversations();
-      await loadConversationMessages(j.conversation_uid);
     } catch (e) {
       setError(String(e));
     } finally {
       setBusy(false);
     }
-  }, [loadConversations, loadConversationMessages]);
+  };
 
-  const send = useCallback(async () => {
-    if (!conversationUid) {
-      setError('Bấm "Phiên chat mới" trước.');
-      return;
-    }
+  const deleteConversation = async (uid: string) => {
+    if (!confirm("Bạn có chắc chắn muốn xóa cuộc hội thoại này?")) return;
+    try {
+      const r = await fetch(`${apiBase}/api/v1/chat/conversations/${uid}`, { ...creds, method: "DELETE" });
+      if (!r.ok) throw new Error("Delete failed");
+      const items = await loadConversations();
+      if (conversationUid === uid) {
+        if (items.length > 0) loadConversationMessages(items[0].uid);
+        else { setConversationUid(null); setLines([]); }
+      }
+    } catch (e) { setError(String(e)); }
+  };
+
+  const renameConversation = async (uid: string, title: string) => {
+    try {
+      await patchConversationTitleApi(uid, title);
+      setRenameUid(null);
+      await loadConversations();
+    } catch (e) { setError(String(e)); }
+  };
+
+  const send = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!conversationUid || !input.trim() || busy) return;
     const q = input.trim();
-    if (!q) return;
-    const isFirstTurn = !lines.some((l) => l.role === "user");
+    const isFirstTurn = !lines.some(l => l.role === "user");
     setInput("");
     setError(null);
     setBusy(true);
-    setLines((prev) => [
-      ...prev,
-      { role: "user", text: q },
-      { role: "assistant", text: "" },
-    ]);
+    setLines(prev => [...prev, { role: "user", text: q }, { role: "assistant", text: "" }]);
 
     const patchLastAssistant = (text: string, citations?: CitationEntry[]) => {
-      setLines((prev) => {
-        if (prev.length === 0) return prev;
+      setLines(prev => {
         const next = [...prev];
-        const last = next[next.length - 1];
-        if (last?.role !== "assistant") return prev;
-        next[next.length - 1] = { role: "assistant", text, citations };
+        if (next[next.length - 1]?.role === "assistant") {
+          next[next.length - 1] = { role: "assistant", text, citations };
+        }
         return next;
       });
     };
 
-    /** RAGFlow: nhiều event `answer` là delta; event cuối thường `answer: ""`, `final: true`. */
-    const parseDelta = (rawJson: string): ParsedDelta => {
+    const parseDelta = (raw: string): ParsedDelta => {
       try {
-        const o = JSON.parse(rawJson) as { data?: unknown };
-        const d = o.data;
-        if (d === true) return { piece: null, data: null };
-        if (!d || typeof d !== "object" || d === null || !("answer" in d)) {
-          return { piece: null, data: null };
-        }
-        const b = d as { answer?: unknown; final?: unknown };
-        const answer = typeof b.answer === "string" ? b.answer : "";
-        if (!answer && b.final === true) {
-          return { piece: null, data: d as Record<string, unknown> };
-        }
-        return {
-          piece: answer || null,
-          data: d as Record<string, unknown>,
-        };
-      } catch {
-        return { piece: null, data: null };
-      }
+        const o = JSON.parse(raw);
+        if (o.data === true) return { piece: null, data: null };
+        const d = o.data || {};
+        return { piece: d.answer || null, data: d };
+      } catch { return { piece: null, data: null }; }
     };
 
     try {
+      const r = await fetch(`${apiBase}/api/v1/chat/completions`, {
+        ...creds,
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: useStream ? "text/event-stream" : "application/json" },
+        body: JSON.stringify({ conversation_uid: conversationUid, question: q, stream: useStream }),
+      });
+      if (!r.ok) throw new Error(await r.text() || "Fetch error");
+
       if (useStream) {
-        const r = await fetch(`${apiBase}/api/v1/chat/completions`, {
-          ...creds,
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "text/event-stream",
-          },
-          body: JSON.stringify({
-            conversation_uid: conversationUid,
-            question: q,
-            stream: true,
-          }),
-        });
-        if (!r.ok) {
-          const t = await r.text();
-          throw new Error(t || r.statusText);
-        }
         const reader = r.body?.getReader();
-        if (!reader) throw new Error("Không đọc được stream");
+        if (!reader) throw new Error("No reader");
         const dec = new TextDecoder();
-        let lineBuf = "";
         let acc = "";
-        let latestCitationData: unknown = null;
+        let lastData: any = null;
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
-          lineBuf += dec.decode(value, { stream: true });
-          const parts = lineBuf.split("\n");
-          lineBuf = parts.pop() ?? "";
-          for (const part of parts) {
-            const trimmed = part.trim();
-            if (!trimmed.startsWith("data:")) continue;
-            const payload = trimmed.slice(5).trim();
+          const chunk = dec.decode(value);
+          const parts = chunk.split("\n");
+          for (const p of parts) {
+            if (!p.trim().startsWith("data:")) continue;
+            const payload = p.trim().slice(5).trim();
             if (!payload || payload === "[DONE]") continue;
             const { piece, data } = parseDelta(payload);
-            if (data) latestCitationData = data;
-            if (piece) {
-              acc += piece;
-            }
-            if (acc && data) {
-              patchLastAssistant(acc, normalizeCitations(latestCitationData, acc));
-            } else if (piece) {
-              patchLastAssistant(acc, normalizeCitations(latestCitationData, acc));
-            }
+            if (data) lastData = data;
+            if (piece) acc += piece;
+            patchLastAssistant(acc, normalizeCitations(lastData, acc));
           }
         }
-        lineBuf += dec.decode();
-        const tail = lineBuf.trim();
-        if (tail.startsWith("data:")) {
-          const payload = tail.slice(5).trim();
-          if (payload && payload !== "[DONE]") {
-            const { piece, data } = parseDelta(payload);
-            if (data) latestCitationData = data;
-            if (piece) {
-              acc += piece;
-            }
-            if (acc) {
-              patchLastAssistant(acc, normalizeCitations(latestCitationData, acc));
-            }
-          }
-        }
-        setLines((prev) => {
-          if (prev.length === 0) return prev;
-          const next = [...prev];
-          const last = next[next.length - 1];
-          if (last?.role === "assistant" && last.text === "") {
-            next[next.length - 1] = {
-              role: "assistant",
-              text: "(Không nhận được nội dung — kiểm tra RAGFlow / Network)",
-            };
-          }
-          return next;
-        });
-        if (isFirstTurn) {
-          try {
-            await patchConversationTitleApi(conversationUid, titleFromFirstQuestion(q));
-          } catch {
-            /* Không chặn chat nếu đổi tên thất bại */
-          }
-        }
-        await loadConversations();
       } else {
-        const r = await fetch(`${apiBase}/api/v1/chat/completions`, {
-          ...creds,
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            conversation_uid: conversationUid,
-            question: q,
-            stream: false,
-          }),
-        });
-        const j = (await r.json()) as {
-          answer?: string;
-          detail?: unknown;
-          ragflow?: { data?: unknown };
-        };
-        if (!r.ok) {
-          throw new Error(
-            typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail ?? j)
-          );
-        }
-        const answer = j.answer ?? JSON.stringify(j);
-        patchLastAssistant(answer, normalizeCitations(j.ragflow?.data, answer));
-        if (isFirstTurn) {
-          try {
-            await patchConversationTitleApi(conversationUid, titleFromFirstQuestion(q));
-          } catch {
-            /* Không chặn chat nếu đổi tên thất bại */
-          }
-        }
-        await loadConversations();
+        const j = await r.json();
+        const ans = j.answer || "";
+        patchLastAssistant(ans, normalizeCitations(j.ragflow?.data, ans));
       }
+
+      if (isFirstTurn) await patchConversationTitleApi(conversationUid, titleFromFirstQuestion(q)).catch(() => {});
+      await loadConversations();
     } catch (e) {
       setError(String(e));
       patchLastAssistant(`(Lỗi) ${String(e)}`);
     } finally {
       setBusy(false);
     }
-  }, [conversationUid, useStream, input, lines, loadConversations]);
-
-  const openCitationPopover = useCallback(
-    (event: MouseEvent<HTMLElement>, citation: CitationEntry | undefined, id: number) => {
-      const fallback: CitationEntry = citation ?? { id };
-      setCitationPopover({ anchorEl: event.currentTarget, citation: fallback });
-    },
-    []
-  );
-
-  const closeCitationPopover = useCallback(() => {
-    setCitationPopover(null);
-  }, []);
-
-  const openRenameDialog = (c: ConversationItem) => {
-    setRenameUid(c.uid);
-    setRenameDraft(c.title);
-    setRenameOpen(true);
-  };
-
-  const closeRenameDialog = () => {
-    setRenameOpen(false);
-    setRenameUid(null);
-    setRenameDraft("");
-  };
-
-  const submitRename = async () => {
-    if (!renameUid) return;
-    const title = renameDraft.trim();
-    if (!title) return;
-    setError(null);
-    setBusy(true);
-    try {
-      const r = await fetch(`${apiBase}/api/v1/chat/conversations/${renameUid}`, {
-        ...creds,
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title }),
-      });
-      const j = (await r.json()) as ConversationItem | { detail?: unknown };
-      if (!r.ok) {
-        throw new Error(
-          typeof (j as { detail?: unknown }).detail === "string"
-            ? (j as { detail?: string }).detail
-            : JSON.stringify((j as { detail?: unknown }).detail ?? j)
-        );
-      }
-      closeRenameDialog();
-      await loadConversations();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const openDeleteDialog = (c: ConversationItem) => {
-    setDeleteUid(c.uid);
-    setDeleteTitle(c.title);
-    setDeleteOpen(true);
-  };
-
-  const closeDeleteDialog = () => {
-    setDeleteOpen(false);
-    setDeleteUid(null);
-    setDeleteTitle("");
-  };
-
-  const confirmDeleteConversation = async () => {
-    if (!deleteUid) return;
-    setError(null);
-    setBusy(true);
-    try {
-      const r = await fetch(`${apiBase}/api/v1/chat/conversations/${deleteUid}`, {
-        ...creds,
-        method: "DELETE",
-      });
-      const j = (await r.json()) as { status?: string; detail?: unknown };
-      if (!r.ok) {
-        throw new Error(
-          typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail ?? j)
-        );
-      }
-      const wasCurrent = conversationUid === deleteUid;
-      closeDeleteDialog();
-      const items = await loadConversations();
-      if (wasCurrent) {
-        if (items.length > 0) {
-          await loadConversationMessages(items[0].uid);
-        } else {
-          setConversationUid(null);
-          setLines([]);
-        }
-      }
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
   };
 
   return (
-    <Container maxWidth="lg" sx={{ py: 3 }}>
-      <Stack spacing={2}>
-        <Stack
-          direction="row"
-          spacing={1}
-          useFlexGap
-          sx={{ alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}
-        >
-          <Typography variant="h5" component="h1" sx={{ fontWeight: 700 }}>
-            Chat
-          </Typography>
-          <Button
-            component={Link}
-            href="/"
-            variant="text"
-            size="small"
-            startIcon={<HomeOutlinedIcon />}
+    <div className="flex h-screen bg-white overflow-hidden text-zinc-900">
+      {/* Sidebar */}
+      <AnimatePresence mode="wait">
+        {isSidebarOpen && (
+          <motion.aside
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 300, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            className="flex-shrink-0 bg-zinc-50 border-r border-zinc-200 flex flex-col"
           >
-            Trang chủ
-          </Button>
-        </Stack>
+            <div className="p-4 flex items-center justify-between">
+              <h2 className="text-sm font-bold tracking-tight text-zinc-400 uppercase px-2">Hội thoại</h2>
+              <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen(false)} className="md:hidden">
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
 
-        <Typography variant="body2" color="text.secondary">
-          Luồng: trình duyệt → <code>/api/v1/…</code> (Next) → FastAPI → RAGFlow.
-        </Typography>
+            <div className="px-3 pb-4">
+              <Button 
+                onClick={newSession} 
+                disabled={busy} 
+                className="w-full justify-start gap-2 bg-white text-zinc-900 border border-zinc-200 hover:bg-zinc-100 shadow-sm rounded-xl h-11"
+              >
+                <Plus className="w-4 h-4" />
+                Phiên chat mới
+              </Button>
+            </div>
 
-        {error ? (
-          <Alert severity="error" onClose={() => setError(null)}>
-            {error}
-          </Alert>
-        ) : null}
+            <nav className="flex-1 overflow-y-auto px-3 space-y-1 scrollbar-thin">
+              {conversations.map((c) => (
+                <div key={c.uid} className="relative group">
+                  {renameUid === c.uid ? (
+                    <div className="flex items-center gap-1 p-1">
+                      <Input 
+                        value={renameDraft} 
+                        onChange={e => setRenameDraft(e.target.value)}
+                        className="h-8 text-xs rounded-lg"
+                        autoFocus
+                      />
+                      <Button size="icon" variant="ghost" className="h-8 w-8 text-emerald-600" onClick={() => renameConversation(c.uid, renameDraft)}>
+                        <Check className="w-3 h-3" />
+                      </Button>
+                      <Button size="icon" variant="ghost" className="h-8 w-8 text-zinc-400" onClick={() => setRenameUid(null)}>
+                        <X className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => loadConversationMessages(c.uid)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); loadConversationMessages(c.uid); } }}
+                      className={cn(
+                        "w-full text-left px-3 py-2.5 rounded-xl text-sm transition-all flex items-center gap-3 group/item cursor-pointer",
+                        conversationUid === c.uid ? "bg-white border border-zinc-200 shadow-sm text-zinc-900 font-medium" : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
+                      )}
+                    >
+                      <MessageSquarePlus className={cn("w-4 h-4 shrink-0", conversationUid === c.uid ? "text-zinc-900" : "text-zinc-400")} />
+                      <span className="truncate flex-1">{c.title}</span>
+                      <div className="hidden group-hover/item:flex items-center gap-1">
+                        <button onClick={(e) => { e.stopPropagation(); setRenameUid(c.uid); setRenameDraft(c.title); }} className="p-1 hover:bg-zinc-200 rounded-md transition-colors">
+                          <Edit3 className="w-3 h-3" />
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); deleteConversation(c.uid); }} className="p-1 hover:bg-red-100 text-red-500 rounded-md transition-colors" type="button">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </nav>
 
-        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", alignItems: "center" }}>
-          <Button
-            variant="contained"
-            startIcon={busy ? <CircularProgress size={18} color="inherit" /> : <AddCommentOutlinedIcon />}
-            onClick={newSession}
-            disabled={busy}
-          >
-            Phiên chat mới
-          </Button>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={useStream}
-                onChange={(e) => setUseStream(e.target.checked)}
+            <div className="p-4 border-t border-zinc-200 space-y-2">
+              <Link href="/" className="flex items-center gap-3 px-3 py-2 text-sm text-zinc-500 hover:text-zinc-900 transition-colors">
+                <Home className="w-4 h-4" />
+                Trang chủ
+              </Link>
+            </div>
+          </motion.aside>
+        )}
+      </AnimatePresence>
+
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col min-w-0 relative bg-white">
+        {/* Header */}
+        <header className="h-16 flex-shrink-0 border-b border-zinc-100 flex items-center justify-between px-6 bg-white/80 backdrop-blur-md sticky top-0 z-20">
+          <div className="flex items-center gap-4">
+            {!isSidebarOpen && (
+              <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen(true)}>
+                <Menu className="w-5 h-5 text-zinc-500" />
+              </Button>
+            )}
+            <div>
+              <h1 className="text-base font-bold tracking-tight">
+                {conversations.find(c => c.uid === conversationUid)?.title || "Phiên chat mới"}
+              </h1>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+             <div className="flex items-center gap-2 bg-zinc-100 p-1 rounded-lg">
+                <button 
+                  onClick={() => setUseStream(true)}
+                  className={cn("px-3 py-1 text-[10px] font-bold rounded-md transition-all", useStream ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500")}
+                >
+                  STREAM
+                </button>
+                <button 
+                  onClick={() => setUseStream(false)}
+                  className={cn("px-3 py-1 text-[10px] font-bold rounded-md transition-all", !useStream ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500")}
+                >
+                  STATIC
+                </button>
+             </div>
+          </div>
+        </header>
+
+        {/* Message Area */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 md:p-12 space-y-8 scroll-smooth scrollbar-thin">
+          {lines.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-center space-y-6 max-w-sm mx-auto">
+              <div className="w-16 h-16 bg-zinc-50 border border-zinc-100 rounded-3xl flex items-center justify-center shadow-sm">
+                <Bot className="w-8 h-8 text-zinc-400" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-xl font-bold">Bắt đầu thảo luận</h3>
+                <p className="text-sm text-zinc-500 leading-relaxed"> Đặt câu hỏi về các văn bản pháp luật, hệ thống sẽ phân tích và phản hồi kèm trích dẫn nguồn.</p>
+              </div>
+              {!conversationUid && (
+                <Button onClick={newSession} className="bg-zinc-900 text-white hover:bg-zinc-800 rounded-xl h-11 px-8">
+                  Bắt đầu ngay
+                </Button>
+              )}
+            </div>
+          ) : (
+            lines.map((l, i) => (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                key={i} 
+                className={cn(
+                  "flex group gap-4 transition-all max-w-4xl mx-auto",
+                  l.role === "user" ? "flex-row-reverse" : "flex-row"
+                )}
+              >
+                <div className={cn(
+                  "w-8 h-8 shrink-0 rounded-xl flex items-center justify-center border shadow-sm",
+                  l.role === "user" ? "bg-white border-zinc-200 text-zinc-900" : "bg-zinc-900 border-zinc-900 text-white"
+                )}>
+                  {l.role === "user" ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+                </div>
+
+                <div className={cn(
+                  "flex flex-col gap-2 min-w-0 max-w-[85%]",
+                  l.role === "user" ? "items-end" : "items-start"
+                )}>
+                  <div className={cn(
+                    "px-5 py-3.5 rounded-2xl text-[15px] leading-relaxed shadow-sm transition-all whitespace-pre-wrap break-words",
+                    l.role === "user" 
+                      ? "bg-zinc-900 text-white" 
+                      : "bg-white border border-zinc-200 text-zinc-900"
+                  )}>
+                    {l.role === "assistant" && busy && !l.text ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
+                    ) : (
+                      (() => {
+                        if (l.role !== "assistant") return l.text;
+                        const citationMap = new Map((l.citations ?? []).map(c => [c.id, c]));
+                        const parts = l.text.split(/(\[?ID:\d+\]?)/g);
+                        return parts.map((part, idx) => {
+                          const m = part.match(/^\[?ID:(\d+)\]?$/);
+                          if (!m) return part;
+                          const id = Number(m[1]);
+                          const citation = citationMap.get(id);
+                          if (!citation) return part;
+                          return <Citation key={idx} citation={citation} />;
+                        });
+                      })()
+                    )}
+                  </div>
+                  {l.role === "assistant" && l.citations && l.citations.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {l.citations.slice(0, 3).map(c => (
+                        <div key={c.id} className="text-[11px] font-medium text-zinc-400 flex items-center gap-1">
+                          <FileText className="w-3 h-3" />
+                          {c.title || `Nguồn ${c.id}`}
+                        </div>
+                      ))}
+                      {l.citations.length > 3 && (
+                        <div className="text-[11px] font-medium text-zinc-400">+{l.citations.length - 3} more</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            ))
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+
+
+        {/* Input Area */}
+        <div className="p-6 md:p-12 pt-0 sticky bottom-0 bg-white">
+          <div className="max-w-4xl mx-auto relative group">
+            {error && (
+              <div className="absolute -top-16 left-0 right-0 p-4 rounded-xl bg-red-50 border border-red-100 flex items-center gap-3 text-red-700 text-sm shadow-sm">
+                <AlertCircle className="w-4 h-4" />
+                {error}
+                <button onClick={() => setError(null)} className="ml-auto p-1 hover:bg-red-200 rounded-md"><X className="w-3 h-3" /></button>
+              </div>
+            )}
+            
+            <form onSubmit={send} className="relative">
+              <textarea
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                placeholder="Nhập câu hỏi của bạn tại đây..."
+                className="w-full bg-zinc-50 border border-zinc-200 focus:border-zinc-300 focus:ring-0 focus:bg-white p-5 pr-20 rounded-2xl md:rounded-3xl text-[15px] resize-none h-[64px] min-h-[64px] transition-all scrollbar-none"
                 disabled={busy}
               />
-            }
-            label="Stream (SSE)"
-          />
-        </Stack>
-
-        <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-          <Paper
-            variant="outlined"
-            sx={{ width: { xs: "100%", md: 300 }, maxHeight: "min(55vh, 480px)", overflow: "auto", p: 1 }}
-          >
-            <Typography variant="subtitle2" sx={{ px: 1, py: 0.5 }}>
-              Cuộc hội thoại
-            </Typography>
-            <Stack spacing={0.5}>
-              {conversations.length === 0 ? (
-                <Typography variant="body2" color="text.secondary" sx={{ px: 1, py: 1 }}>
-                  Chưa có cuộc hội thoại nào.
-                </Typography>
-              ) : (
-                conversations.map((c) => (
-                  <Box
-                    key={c.uid}
-                    sx={{
-                      display: "flex",
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 0.25,
-                      pr: 0.5,
-                    }}
-                  >
-                    <Button
-                      variant={conversationUid === c.uid ? "contained" : "text"}
-                      size="small"
-                      onClick={() => void loadConversationMessages(c.uid)}
-                      sx={{
-                        flex: 1,
-                        minWidth: 0,
-                        justifyContent: "flex-start",
-                        textTransform: "none",
-                      }}
-                    >
-                      {c.title}
-                    </Button>
-                    <Tooltip title="Đổi tên">
-                      <IconButton
-                        size="small"
-                        aria-label="Đổi tên hội thoại"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openRenameDialog(c);
-                        }}
-                        disabled={busy}
-                      >
-                        <EditOutlinedIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Xóa">
-                      <IconButton
-                        size="small"
-                        aria-label="Xóa hội thoại"
-                        color="error"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openDeleteDialog(c);
-                        }}
-                        disabled={busy}
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  </Box>
-                ))
-              )}
-            </Stack>
-          </Paper>
-          <Paper
-            variant="outlined"
-            sx={{
-              p: 2,
-              flex: 1,
-              minHeight: 280,
-              maxHeight: "min(55vh, 480px)",
-              overflow: "auto",
-              bgcolor: "action.hover",
-            }}
-          >
-            {lines.length === 0 ? (
-              <Typography color="text.secondary" align="center" sx={{ py: 6 }}>
-                Bấm &quot;Phiên chat mới&quot; hoặc chọn hội thoại bên trái.
-              </Typography>
-            ) : (
-              <Stack spacing={1.5}>
-                {lines.map((l, i) => (
-                  <Stack
-                    key={i}
-                    direction="row"
-                    spacing={1}
-                    sx={{
-                      alignItems: "flex-start",
-                      justifyContent: l.role === "user" ? "flex-end" : "flex-start",
-                    }}
-                  >
-                    {l.role !== "user" ? (
-                      <Avatar sx={{ width: 32, height: 32, ...roleAvatarSx(l.role) }}>
-                        {roleIcon(l.role)}
-                      </Avatar>
-                    ) : null}
-                    <Paper
-                      elevation={0}
-                      sx={{
-                        px: 1.5,
-                        py: 1,
-                        maxWidth: "85%",
-                        bgcolor:
-                          l.role === "user"
-                            ? "primary.main"
-                            : l.role === "assistant"
-                              ? "background.paper"
-                              : "grey.200",
-                        color: l.role === "user" ? "primary.contrastText" : "text.primary",
-                        borderRadius: 2,
-                      }}
-                    >
-                      <Typography variant="caption" sx={{ display: "block", opacity: 0.85, mb: 0.25 }}>
-                        {l.role}
-                      </Typography>
-                      <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                        {l.role === "assistant" && busy && !l.text
-                          ? "…"
-                          : (() => {
-                              if (l.role !== "assistant") return l.text;
-                              const txt = l.text;
-                              const citationById = new Map((l.citations ?? []).map((c) => [c.id, c]));
-                              const parts = txt.split(/(\[?ID:\d+\]?)/g);
-                              return parts.map((part, idx) => {
-                                const m = part.match(/^\[?ID:(\d+)\]?$/);
-                                if (!m) return <span key={`${idx}-${part}`}>{part}</span>;
-                                const id = Number(m[1]);
-                                const citation = citationById.get(id);
-                                return (
-                                  <Tooltip
-                                    key={`${idx}-${part}`}
-                                    title={citationContent(citation)}
-                                    arrow
-                                    enterTouchDelay={0}
-                                  >
-                                    <Chip
-                                      component="span"
-                                      size="small"
-                                      clickable
-                                      label={`Nguồn ${id}`}
-                                      onClick={(e) => openCitationPopover(e, citation, id)}
-                                      sx={{ mx: 0.25, my: 0.25, verticalAlign: "middle" }}
-                                    />
-                                  </Tooltip>
-                                );
-                              });
-                            })()}
-                      </Typography>
-                    </Paper>
-                    {l.role === "user" ? (
-                      <Avatar sx={{ width: 32, height: 32, ...roleAvatarSx("user") }}>
-                        {roleIcon(l.role)}
-                      </Avatar>
-                    ) : null}
-                  </Stack>
-                ))}
-              </Stack>
-            )}
-          </Paper>
-        </Stack>
-
-        <TextField
-          fullWidth
-          multiline
-          minRows={3}
-          placeholder="Câu hỏi…"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={busy}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-          helperText="Ctrl+Enter để gửi"
-        />
-        <Button
-          variant="contained"
-          size="large"
-          startIcon={<SendIcon />}
-          onClick={() => void send()}
-          disabled={busy}
-        >
-          Gửi
-        </Button>
-      </Stack>
-      <Popover
-        open={Boolean(citationPopover)}
-        anchorEl={citationPopover?.anchorEl ?? null}
-        onClose={closeCitationPopover}
-        anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
-        transformOrigin={{ vertical: "top", horizontal: "left" }}
-      >
-        <Box sx={{ p: 1.5, maxWidth: 420 }}>
-          <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-            {citationContent(citationPopover?.citation)}
-          </Typography>
-        </Box>
-      </Popover>
-
-      <Dialog open={renameOpen} onClose={() => !busy && closeRenameDialog()} fullWidth maxWidth="sm">
-        <DialogTitle>Đổi tên hội thoại</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="Tên hiển thị"
-            fullWidth
-            value={renameDraft}
-            onChange={(e) => setRenameDraft(e.target.value)}
-            disabled={busy}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void submitRename();
-              }
-            }}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={closeRenameDialog} disabled={busy}>
-            Hủy
-          </Button>
-          <Button variant="contained" onClick={() => void submitRename()} disabled={busy || !renameDraft.trim()}>
-            Lưu
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={deleteOpen} onClose={() => !busy && closeDeleteDialog()}>
-        <DialogTitle>Xóa hội thoại</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2">
-            Xóa &quot;{deleteTitle}&quot;? Thao tác này không thể hoàn tác.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={closeDeleteDialog} disabled={busy}>
-            Hủy
-          </Button>
-          <Button color="error" variant="contained" onClick={() => void confirmDeleteConversation()} disabled={busy}>
-            Xóa
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </Container>
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                <Button 
+                  type="submit" 
+                  disabled={busy || !input.trim()}
+                  size="icon" 
+                  className={cn(
+                    "w-10 h-10 rounded-xl md:rounded-2xl transition-all shadow-sm",
+                    input.trim() ? "bg-zinc-900 text-white hover:scale-105" : "bg-zinc-100 text-zinc-300 pointer-events-none"
+                  )}
+                >
+                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </main>
+    </div>
   );
 }
